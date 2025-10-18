@@ -40,18 +40,8 @@ export default function WhiteboardPage() {
     error: transcriptionError
   } = useBackgroundTranscription({
     socket: socketRef.current,
-    sessionId,
-    onBatchAnalyzed: (mainPoints) => {
-      // Send main points via WebSocket
-      if (socketRef.current?.connected) {
-        mainPoints.forEach(pointText => {
-          socketRef.current?.emit('mainpoint:add', {
-            sessionId,
-            text: pointText
-          });
-        });
-      }
-    }
+    sessionId
+    // onBatchAnalyzed callback not needed - useBackgroundTranscription handles socket emission
   });
 
   // Initialize WebSocket connection

@@ -120,9 +120,9 @@ export const APP_CONFIG = {
 
 // Perplexity AI configuration
 export const PERPLEXITY_CONFIG = {
-  MODEL: 'llama-3.1-sonar-small-128k-online',
+  MODEL: 'sonar-pro', // Search-optimized model with citations
   MAX_TOKENS: 1000,
-  TEMPERATURE: 0.7,
+  TEMPERATURE: 0.2, // Lower temperature for more factual responses
   TOP_P: 0.9,
   RETURN_CITATIONS: true,
   RETURN_IMAGES: false,

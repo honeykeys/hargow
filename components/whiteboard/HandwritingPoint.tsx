@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
 
 interface HandwritingPointProps {
   text: string;
@@ -15,33 +16,70 @@ export default function HandwritingPoint({
   onEnrich,
   isEnriching = false
 }: HandwritingPointProps) {
-  const [isVisible, setIsVisible] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [animationComplete, setAnimationComplete] = useState(false);
 
+  // Split text into characters for animation
+  const characters = useMemo(() => {
+    // Ensure text is a string
+    const textStr = typeof text === 'string' ? text : String(text || '');
+    return textStr.split('');
+  }, [text]);
+
+  // Calculate total animation duration
+  const totalDuration = useMemo(() => {
+    // Base delay for staggering points + character animation time
+    const staggerDelay = index * 0.8; // seconds
+    const charDelay = characters.length * 0.03; // 30ms per character
+    return (staggerDelay + charDelay) * 1000; // Convert to ms
+  }, [index, characters.length]);
+
   useEffect(() => {
-    // Stagger the appearance of points
+    // Mark animation as complete after duration
     const timer = setTimeout(() => {
-      setIsVisible(true);
-    }, index * 1000); // 1 second delay between points
+      setAnimationComplete(true);
+    }, totalDuration);
 
     return () => clearTimeout(timer);
-  }, [index]);
-
-  useEffect(() => {
-    if (isVisible) {
-      // Mark animation as complete after duration
-      const timer = setTimeout(() => {
-        setAnimationComplete(true);
-      }, 2500); // Match animation duration
-
-      return () => clearTimeout(timer);
-    }
-  }, [isVisible]);
+  }, [totalDuration]);
 
   const handleEnrich = () => {
     if (!isEnriching) {
       onEnrich(text);
+    }
+  };
+
+  // Container animation variants
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.03, // 30ms between each character
+        delayChildren: index * 0.8, // Stagger points by 800ms
+      }
+    }
+  };
+
+  // Character animation variants with realistic handwriting effect
+  const charVariants = {
+    hidden: {
+      opacity: 0,
+      y: 5,
+      x: -3,
+      scale: 0.8,
+    },
+    visible: {
+      opacity: 1,
+      y: 0,
+      x: 0,
+      scale: 1,
+      transition: {
+        type: 'spring',
+        damping: 12,
+        stiffness: 200,
+        duration: 0.15,
+      }
     }
   };
 
@@ -53,28 +91,48 @@ export default function HandwritingPoint({
     >
       {/* Main point text with handwriting effect */}
       <div className="flex items-start gap-4">
-        <div className="flex-shrink-0 mt-2">
+        <motion.div
+          className="flex-shrink-0 mt-2"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{
+            delay: index * 0.8,
+            type: 'spring',
+            damping: 10,
+            stiffness: 200
+          }}
+        >
           <div className="w-2 h-2 bg-gray-700 rounded-full" />
-        </div>
+        </motion.div>
 
         <div className="flex-1">
-          <p
-            className={`
-              text-3xl font-handwriting text-gray-900 leading-relaxed
-              ${isVisible ? 'animate-handwriting' : 'opacity-0'}
-            `}
+          <motion.p
+            className="text-3xl font-handwriting text-gray-900 leading-relaxed"
             style={{
-              '--handwriting-delay': `${index * 1000}ms`,
               fontFamily: '"Kalam", cursive',
               letterSpacing: '0.02em'
-            } as React.CSSProperties}
+            }}
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
           >
-            {text}
-          </p>
+            {characters.map((char, i) => (
+              <motion.span
+                key={`${index}-${i}`}
+                variants={charVariants}
+                style={{ display: 'inline-block', whiteSpace: char === ' ' ? 'pre' : 'normal' }}
+              >
+                {char === ' ' ? '\u00A0' : char}
+              </motion.span>
+            ))}
+          </motion.p>
 
           {/* Enrich button - only show after animation and on hover */}
           {animationComplete && isHovered && (
-            <button
+            <motion.button
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
               onClick={handleEnrich}
               disabled={isEnriching}
               className={`
@@ -100,7 +158,7 @@ export default function HandwritingPoint({
                   Enrich
                 </span>
               )}
-            </button>
+            </motion.button>
           )}
         </div>
       </div>

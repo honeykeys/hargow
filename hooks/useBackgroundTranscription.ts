@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDeepgramService, TranscriptSegment } from '@/lib/api/deepgram';
 import { Socket } from 'socket.io-client';
 
-const ANALYSIS_INTERVAL = 30000; // 30 seconds
+const ANALYSIS_INTERVAL = 10000; // 10 seconds (for demo responsiveness)
 const MIN_BUFFER_LENGTH = 50; // Minimum characters before analysis
 
 interface UseBackgroundTranscriptionOptions {
@@ -71,10 +71,10 @@ function useBackgroundTranscription({
 
       // Emit main points via WebSocket
       if (socket && mainPoints.length > 0) {
-        mainPoints.forEach((point: string) => {
+        mainPoints.forEach((point: any) => {
           socket.emit('mainpoint:add', {
             sessionId,
-            text: point,
+            text: typeof point === 'string' ? point : point.text,
             timestamp: new Date().toISOString()
           });
         });
@@ -82,7 +82,8 @@ function useBackgroundTranscription({
 
       // Callback for local state update
       if (onBatchAnalyzed && mainPoints.length > 0) {
-        onBatchAnalyzed(mainPoints);
+        const mainPointTexts = mainPoints.map((p: any) => typeof p === 'string' ? p : p.text);
+        onBatchAnalyzed(mainPointTexts);
       }
 
       // Clear the batch buffer after successful analysis
@@ -117,10 +118,15 @@ function useBackgroundTranscription({
       setIsRecording(true);
       recordingStartTimeRef.current = new Date();
 
-      // Initialize Deepgram service
-      if (!deepgramServiceRef.current) {
-        deepgramServiceRef.current = getDeepgramService();
+      // Clean up any existing instance first
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stopTranscription();
+        deepgramServiceRef.current = null;
       }
+
+      // Initialize Deepgram service
+      // Always create a new instance for each recording session
+      deepgramServiceRef.current = getDeepgramService();
 
       // Start transcription
       await deepgramServiceRef.current.startTranscription(
@@ -170,11 +176,21 @@ function useBackgroundTranscription({
    * Stop recording and transcription
    */
   const stopRecording = useCallback(() => {
-    if (!isRecording) return;
+    if (!isRecording) {
+      console.log('[Transcription] Already stopped, ignoring');
+      return;
+    }
+
+    console.log('[Transcription] Stopping recording...');
 
     // Stop Deepgram service
     if (deepgramServiceRef.current) {
-      deepgramServiceRef.current.stopTranscription();
+      try {
+        deepgramServiceRef.current.stopTranscription();
+        deepgramServiceRef.current = null;
+      } catch (error) {
+        console.error('[Transcription] Error stopping Deepgram:', error);
+      }
     }
 
     // Clear intervals
@@ -208,19 +224,26 @@ function useBackgroundTranscription({
     setRecordingDuration(0);
     recordingStartTimeRef.current = null;
 
-    console.log('[Transcription] Recording stopped');
+    console.log('[Transcription] Recording stopped successfully');
   }, [isRecording, socket, sessionId, recordingDuration, analyzeBatch]);
 
   /**
-   * Cleanup on unmount
+   * Cleanup on unmount only
    */
   useEffect(() => {
     return () => {
-      if (isRecording) {
-        stopRecording();
+      // Only cleanup when component unmounts
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stopTranscription();
+      }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+      }
+      if (analysisIntervalRef.current) {
+        clearInterval(analysisIntervalRef.current);
       }
     };
-  }, [isRecording, stopRecording]);
+  }, []); // Empty deps - only run on mount/unmount
 
   return {
     isRecording,
