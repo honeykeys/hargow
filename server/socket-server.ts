@@ -11,7 +11,12 @@ import {
   handleQuizGenerate,
   handleQuizAnswer,
   handleTranscriptUpdate,
-  handleSessionEnd
+  handleSessionEnd,
+  handleMainPointAdd,
+  handleMainPointEnrich,
+  handleRecordingStarted,
+  handleRecordingStopped,
+  handleBoardClear
 } from './websocket-handlers';
 
 // Socket.io server instance
@@ -57,9 +62,19 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
       await handleSessionCreate(io!, socket, teacherName);
     });
 
+    // Also listen for 'session:create' (used by home page)
+    socket.on('session:create', async (teacherName: string) => {
+      await handleSessionCreate(io!, socket, teacherName);
+    });
+
     // Handle session join (student or teacher)
     socket.on(SOCKET_EVENTS.JOIN_SESSION, async (sessionId: string, userName: string) => {
       await handleSessionJoin(io!, socket, sessionId, userName, clientSessions, sessionParticipants);
+    });
+
+    // Also listen for 'session:join' (used by client components)
+    socket.on('session:join', async (data: { sessionId: string; role?: 'teacher' | 'student'; name: string }) => {
+      await handleSessionJoin(io!, socket, data.sessionId, data.name, clientSessions, sessionParticipants, data.role);
     });
 
     // Handle leaving session
@@ -67,9 +82,19 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
       await handleSessionLeave(io!, socket, clientSessions, sessionParticipants);
     });
 
+    // Also listen for 'session:leave' (used by client components)
+    socket.on('session:leave', async () => {
+      await handleSessionLeave(io!, socket, clientSessions, sessionParticipants);
+    });
+
     // Handle question submission
     socket.on(SOCKET_EVENTS.SUBMIT_QUESTION, async (questionText: string) => {
       await handleQuestionSubmit(io!, socket, questionText, clientSessions);
+    });
+
+    // Also listen for 'question:submit' (used by QuestionForm)
+    socket.on('question:submit', async (data: any) => {
+      await handleQuestionSubmit(io!, socket, data.text, clientSessions);
     });
 
     // Handle question upvote
@@ -82,14 +107,58 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
       await handleQuizGenerate(io!, socket, clientSessions);
     });
 
+    // Also listen for 'quiz:generate' (used by whiteboard)
+    socket.on('quiz:generate', async () => {
+      await handleQuizGenerate(io!, socket, clientSessions);
+    });
+
     // Handle quiz answer submission
     socket.on(SOCKET_EVENTS.SUBMIT_QUIZ_RESPONSE, async (response: any) => {
       await handleQuizAnswer(io!, socket, response, clientSessions);
     });
 
+    // Also listen for 'quiz:answer' and 'quiz:submit' (used by QuizInterface)
+    socket.on('quiz:answer', async (data: any) => {
+      await handleQuizAnswer(io!, socket, data, clientSessions);
+    });
+
+    socket.on('quiz:submit', async (data: any) => {
+      await handleQuizAnswer(io!, socket, data, clientSessions);
+    });
+
     // Handle transcript update
     socket.on(SOCKET_EVENTS.UPDATE_TRANSCRIPT, async (text: string) => {
       await handleTranscriptUpdate(io!, socket, text, clientSessions);
+    });
+
+    // Also listen for 'transcript:update' (used by whiteboard components)
+    socket.on('transcript:update', async (data: { sessionId: string; text: string }) => {
+      await handleTranscriptUpdate(io!, socket, data.text, clientSessions);
+    });
+
+    // Handle main point add
+    socket.on('mainpoint:add', async (data: any) => {
+      await handleMainPointAdd(io!, socket, data, clientSessions);
+    });
+
+    // Handle main point enrich
+    socket.on('mainpoint:enrich', async (data: any) => {
+      await handleMainPointEnrich(io!, socket, data, clientSessions);
+    });
+
+    // Handle recording started
+    socket.on('recording:start', async () => {
+      await handleRecordingStarted(io!, socket, clientSessions);
+    });
+
+    // Handle recording stopped
+    socket.on('recording:stop', async () => {
+      await handleRecordingStopped(io!, socket, clientSessions);
+    });
+
+    // Handle board clear
+    socket.on('board:clear', async () => {
+      await handleBoardClear(io!, socket, clientSessions);
     });
 
     // Handle session end (teacher only)

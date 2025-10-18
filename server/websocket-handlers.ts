@@ -101,7 +101,8 @@ export async function handleSessionJoin(
   sessionId: string,
   userName: string,
   clientSessions: Map<string, string>,
-  sessionParticipants: Map<string, Set<string>>
+  sessionParticipants: Map<string, Set<string>>,
+  role?: 'teacher' | 'student'
 ) {
   try {
     console.log(`[WebSocket] ${userName} joining session: ${sessionId}`);
@@ -128,6 +129,7 @@ export async function handleSessionJoin(
     const participant: Participant = {
       id: socket.id,
       name: userName,
+      role: role || 'student',
       joinedAt: new Date(),
       isActive: true
     };
@@ -160,6 +162,12 @@ export async function handleSessionJoin(
     socket.data.participantId = participant.id;
 
     // Send current session state to joining client
+    socket.emit('session:joined', {
+      success: true,
+      session: updatedSession,
+      participant: participant
+    });
+
     socket.emit(SOCKET_EVENTS.SESSION_UPDATE, updatedSession);
 
     // Broadcast participant joined to all in room
@@ -295,6 +303,9 @@ export async function handleQuestionSubmit(
     // Broadcast new question to all in room
     io.to(sessionId).emit(SOCKET_EVENTS.QUESTION_RECEIVED, question);
 
+    // Confirm to the submitter
+    socket.emit('question:confirmed', question);
+
     socket.emit('question:submitted', {
       success: true,
       questionId: question.id,
@@ -385,26 +396,38 @@ export async function handleQuizGenerate(
     console.log(`[WebSocket] Generating quiz for session ${sessionId}`);
 
     // Create stub quiz for now
-    const quiz: Quiz = {
+    const quizQuestions = [
+      {
+        id: nanoid(),
+        question: 'What is the capital of France?',
+        options: ['London', 'Berlin', 'Paris', 'Madrid'],
+        correctIndex: 2,
+        explanation: 'Paris is the capital and largest city of France.'
+      },
+      {
+        id: nanoid(),
+        question: 'What is 2 + 2?',
+        options: ['3', '4', '5', '6'],
+        correctIndex: 1,
+        explanation: '2 + 2 equals 4.'
+      },
+      {
+        id: nanoid(),
+        question: 'Which planet is known as the Red Planet?',
+        options: ['Venus', 'Mars', 'Jupiter', 'Saturn'],
+        correctIndex: 1,
+        explanation: 'Mars is known as the Red Planet due to its reddish appearance.'
+      }
+    ];
+
+    const quiz: any = {
       id: nanoid(),
       generatedAt: new Date(),
-      questions: [
-        {
-          id: nanoid(),
-          question: 'What is the capital of France?',
-          options: ['London', 'Berlin', 'Paris', 'Madrid'],
-          correctIndex: 2,
-          explanation: 'Paris is the capital and largest city of France.'
-        },
-        {
-          id: nanoid(),
-          question: 'What is 2 + 2?',
-          options: ['3', '4', '5', '6'],
-          correctIndex: 1,
-          explanation: '2 + 2 equals 4.'
-        }
-      ],
-      responses: new Map(),
+      questions: quizQuestions.map(q => ({
+        ...q,
+        correctAnswer: q.options[q.correctIndex] // Add correctAnswer for easy comparison
+      })),
+      responses: [],
       analytics: {
         totalResponses: 0,
         questionStats: new Map(),
@@ -426,6 +449,7 @@ export async function handleQuizGenerate(
 
     // Broadcast quiz to all participants
     io.to(sessionId).emit(SOCKET_EVENTS.QUIZ_GENERATED, quiz);
+    io.to(sessionId).emit('quiz:started', quiz); // For student clients
 
     socket.emit('quiz:generated', {
       success: true,
@@ -550,6 +574,200 @@ export async function handleTranscriptUpdate(
     console.log(`[WebSocket] Transcript updated for session ${sessionId}`);
   } catch (error) {
     console.error('[WebSocket] Error updating transcript:', error);
+  }
+}
+
+/**
+ * Handle main point addition
+ */
+export async function handleMainPointAdd(
+  io: SocketIOServer,
+  socket: Socket,
+  mainPoint: Omit<MainPoint, 'id' | 'timestamp'>,
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Check if user is teacher
+    if (!socket.data.isTeacher) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.TEACHER_ONLY
+      });
+      return;
+    }
+
+    // Create main point
+    const point: MainPoint = {
+      id: nanoid(),
+      ...mainPoint,
+      timestamp: new Date()
+    };
+
+    // Add to session
+    const updatedSession = sessionManager.addMainPoint(sessionId, point);
+
+    if (!updatedSession) {
+      return;
+    }
+
+    // Broadcast main point to all participants
+    io.to(sessionId).emit('mainpoint:added', point);
+
+    console.log(`[WebSocket] Main point added to session ${sessionId}`);
+  } catch (error) {
+    console.error('[WebSocket] Error adding main point:', error);
+  }
+}
+
+/**
+ * Handle main point enrichment
+ */
+export async function handleMainPointEnrich(
+  io: SocketIOServer,
+  socket: Socket,
+  data: { pointId: string; enrichedText: string; citations?: string[] },
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Check if user is teacher
+    if (!socket.data.isTeacher) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.TEACHER_ONLY
+      });
+      return;
+    }
+
+    // Broadcast enriched content to all participants
+    io.to(sessionId).emit('mainpoint:enriched', data);
+
+    console.log(`[WebSocket] Main point enriched in session ${sessionId}`);
+  } catch (error) {
+    console.error('[WebSocket] Error enriching main point:', error);
+  }
+}
+
+/**
+ * Handle recording started
+ */
+export async function handleRecordingStarted(
+  io: SocketIOServer,
+  socket: Socket,
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Check if user is teacher
+    if (!socket.data.isTeacher) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.TEACHER_ONLY
+      });
+      return;
+    }
+
+    // Broadcast recording started to all participants
+    io.to(sessionId).emit('recording:started');
+
+    console.log(`[WebSocket] Recording started in session ${sessionId}`);
+  } catch (error) {
+    console.error('[WebSocket] Error starting recording:', error);
+  }
+}
+
+/**
+ * Handle recording stopped
+ */
+export async function handleRecordingStopped(
+  io: SocketIOServer,
+  socket: Socket,
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Check if user is teacher
+    if (!socket.data.isTeacher) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.TEACHER_ONLY
+      });
+      return;
+    }
+
+    // Broadcast recording stopped to all participants
+    io.to(sessionId).emit('recording:stopped');
+
+    console.log(`[WebSocket] Recording stopped in session ${sessionId}`);
+  } catch (error) {
+    console.error('[WebSocket] Error stopping recording:', error);
+  }
+}
+
+/**
+ * Handle board clear
+ */
+export async function handleBoardClear(
+  io: SocketIOServer,
+  socket: Socket,
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Check if user is teacher
+    if (!socket.data.isTeacher) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.TEACHER_ONLY
+      });
+      return;
+    }
+
+    // Clear main points in session
+    sessionManager.clearMainPoints(sessionId);
+
+    // Broadcast board cleared to all participants
+    io.to(sessionId).emit('board:cleared');
+
+    console.log(`[WebSocket] Board cleared in session ${sessionId}`);
+  } catch (error) {
+    console.error('[WebSocket] Error clearing board:', error);
   }
 }
 

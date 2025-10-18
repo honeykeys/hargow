@@ -1,94 +1,117 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Socket } from 'socket.io-client';
 import useSessionStore from '@/lib/store';
+import { nanoid } from 'nanoid';
 
 interface QuizInterfaceProps {
-  socket: any;
+  socket: Socket | null;
   sessionId: string;
-  studentId: string;
-  studentName: string;
 }
 
-export default function QuizInterface({
-  socket,
-  sessionId,
-  studentId,
-  studentName
-}: QuizInterfaceProps) {
-  const { session } = useSessionStore();
-  const quiz = session?.activeQuiz;
+export default function QuizInterface({ socket, sessionId }: QuizInterfaceProps) {
+  const { activeQuiz, session } = useSessionStore();
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<{ [key: string]: string }>({});
-  const [hasSubmitted, setHasSubmitted] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [hasAnsweredCurrent, setHasAnsweredCurrent] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasSubmittedQuiz, setHasSubmittedQuiz] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(60); // 60 seconds per question
 
-  const currentQuestion = quiz?.questions?.[currentQuestionIndex];
-  const totalQuestions = quiz?.questions?.length || 0;
-  const participantCount = quiz?.responses?.length || 0;
+  const currentQuestion = activeQuiz?.questions?.[currentQuestionIndex];
+  const totalQuestions = activeQuiz?.questions?.length || 0;
+  const answeredCount = activeQuiz?.responses?.length || 0;
+  const totalParticipants = session?.participants?.filter(p => p.role === 'student').length || 1;
 
-  // Timer for quiz
+  // Timer for current question (60 seconds per question)
   useEffect(() => {
-    if (quiz && quiz.timeLimit && !hasSubmitted) {
-      const endTime = new Date(quiz.createdAt).getTime() + (quiz.timeLimit * 1000);
+    if (currentQuestion && !hasAnsweredCurrent && !hasSubmittedQuiz) {
+      setTimeRemaining(60);
 
       const interval = setInterval(() => {
-        const now = Date.now();
-        const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
-
-        setTimeRemaining(remaining);
-
-        if (remaining === 0 && !hasSubmitted) {
-          handleSubmitQuiz();
-          clearInterval(interval);
-        }
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            // Auto-submit and move to next question
+            handleSelectAnswer('TIMEOUT');
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
 
       return () => clearInterval(interval);
     }
-  }, [quiz, hasSubmitted]);
+  }, [currentQuestionIndex, hasAnsweredCurrent, hasSubmittedQuiz]);
 
-  const handleSelectAnswer = (questionId: string, answer: string) => {
-    if (hasSubmitted) return;
+  const handleSelectAnswer = (answer: string) => {
+    if (hasAnsweredCurrent || !currentQuestion || hasSubmittedQuiz) return;
 
-    setSelectedAnswers(prev => ({
-      ...prev,
-      [questionId]: answer
-    }));
+    // Save answer
+    const updatedAnswers = {
+      ...selectedAnswers,
+      [currentQuestion.id]: answer
+    };
+    setSelectedAnswers(updatedAnswers);
+    setHasAnsweredCurrent(true);
 
-    // Auto-advance to next question after selection
+    // Emit answer immediately to server
+    if (socket && socket.connected) {
+      socket.emit('quiz:answer', {
+        sessionId,
+        quizId: activeQuiz?.id,
+        questionId: currentQuestion.id,
+        answer: answer,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Auto-advance to next question or finish quiz
     setTimeout(() => {
       if (currentQuestionIndex < totalQuestions - 1) {
         setCurrentQuestionIndex(prev => prev + 1);
+        setHasAnsweredCurrent(false);
+      } else {
+        // All questions answered
+        handleSubmitQuiz(updatedAnswers);
       }
-    }, 500);
+    }, 1500);
   };
 
-  const handleSubmitQuiz = () => {
-    if (hasSubmitted || !quiz) return;
+  const handleSubmitQuiz = async (finalAnswers: { [key: string]: string }) => {
+    if (hasSubmittedQuiz || !activeQuiz || !socket) return;
 
-    const answers = quiz.questions.map(q => ({
-      questionId: q.id,
-      answer: selectedAnswers[q.id] || '',
-      isCorrect: selectedAnswers[q.id] === q.correctAnswer
-    }));
+    setIsSubmitting(true);
 
-    const score = answers.filter(a => a.isCorrect).length;
+    try {
+      const answers = activeQuiz.questions.map(q => ({
+        questionId: q.id,
+        answer: finalAnswers[q.id] || 'NO_ANSWER',
+        isCorrect: finalAnswers[q.id] === q.correctAnswer
+      }));
 
-    // Emit quiz response to server
-    socket?.emit('quiz:submit', {
-      sessionId,
-      quizId: quiz.id,
-      participantId: studentId,
-      participantName: studentName,
-      answers,
-      score,
-      totalQuestions,
-      submittedAt: new Date().toISOString()
-    });
+      const score = answers.filter(a => a.isCorrect).length;
 
-    setHasSubmitted(true);
+      // Emit quiz submission
+      socket.emit('quiz:submit', {
+        id: nanoid(),
+        sessionId,
+        quizId: activeQuiz.id,
+        participantId: socket.id,
+        answers,
+        score,
+        totalQuestions,
+        submittedAt: new Date().toISOString()
+      });
+
+      setHasSubmittedQuiz(true);
+    } catch (error) {
+      console.error('[Quiz] Error submitting quiz:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -97,58 +120,58 @@ export default function QuizInterface({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getProgressPercentage = () => {
-    const answeredCount = Object.keys(selectedAnswers).length;
-    return (answeredCount / totalQuestions) * 100;
-  };
-
-  if (!quiz) {
+  if (!activeQuiz) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
-        <p className="text-gray-600">No active quiz at the moment</p>
-        <p className="text-sm text-gray-500 mt-1">
-          Wait for your teacher to start a quiz
-        </p>
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white border border-gray-200 rounded-lg p-6 text-center">
+          <div className="text-gray-400 mb-3">
+            <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Quiz</h3>
+          <p className="text-sm text-gray-600">
+            Wait for your teacher to start a quiz
+          </p>
+        </div>
       </div>
     );
   }
 
-  if (hasSubmitted) {
-    const score = Object.entries(selectedAnswers).filter(
-      ([qId, answer]) => {
-        const question = quiz.questions.find(q => q.id === qId);
-        return question?.correctAnswer === answer;
-      }
-    ).length;
-
+  // Waiting for results state
+  if (hasSubmittedQuiz) {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="text-center">
-          <div className="text-4xl mb-2">🎉</div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Quiz Completed!</h3>
-          <p className="text-gray-600 mb-4">
-            Your score: <span className="font-bold text-2xl">{score}/{totalQuestions}</span>
-          </p>
-
-          <div className="bg-gray-50 rounded-lg p-4 mt-4">
-            <p className="text-sm text-gray-600">
-              {participantCount} student{participantCount !== 1 ? 's' : ''} have completed this quiz
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white border border-gray-200 rounded-lg p-6">
+          <div className="text-center">
+            <div className="text-5xl mb-4">✅</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">
+              Answer Submitted
+            </h3>
+            <p className="text-gray-600 mb-6">
+              All questions completed!
             </p>
-          </div>
 
-          <div className="mt-6 space-y-2">
-            {quiz.questions.map((q, idx) => {
-              const userAnswer = selectedAnswers[q.id];
-              const isCorrect = userAnswer === q.correctAnswer;
+            {/* Progress indicator */}
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <div className="text-2xl font-bold text-gray-900 mb-1">
+                {answeredCount}/{totalParticipants}
+              </div>
+              <p className="text-sm text-gray-600">students answered</p>
 
-              return (
-                <div key={q.id} className={`text-sm p-2 rounded ${
-                  isCorrect ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                }`}>
-                  Q{idx + 1}: {isCorrect ? '✓ Correct' : '✗ Incorrect'}
-                </div>
-              );
-            })}
+              {/* Progress bar */}
+              <div className="mt-3 bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(answeredCount / totalParticipants) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-500 animate-pulse">
+              Waiting for results...
+            </p>
           </div>
         </div>
       </div>
@@ -156,46 +179,53 @@ export default function QuizInterface({
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-      {/* Quiz Header */}
-      <div className="bg-blue-600 text-white p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">{quiz.title || 'Class Quiz'}</h3>
-            <p className="text-sm text-blue-100">
-              Question {currentQuestionIndex + 1} of {totalQuestions}
-            </p>
-          </div>
+    <div className="min-h-screen bg-gray-100">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-gray-900">Quiz</h1>
+              <p className="text-sm text-gray-600">
+                Question {currentQuestionIndex + 1} of {totalQuestions}
+              </p>
+            </div>
 
-          {timeRemaining !== null && (
-            <div className="text-center">
+            {/* Timer */}
+            <div className={`text-center ${timeRemaining <= 10 ? 'animate-pulse' : ''}`}>
               <div className={`text-2xl font-mono font-bold ${
-                timeRemaining < 30 ? 'text-yellow-300' : 'text-white'
+                timeRemaining <= 10 ? 'text-red-600' :
+                timeRemaining <= 30 ? 'text-orange-600' :
+                'text-gray-900'
               }`}>
                 {formatTime(timeRemaining)}
               </div>
-              <p className="text-xs text-blue-100">Time Remaining</p>
+              <p className="text-xs text-gray-500">Time left</p>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Progress Bar */}
-        <div className="mt-3 bg-blue-700 rounded-full h-2">
-          <div
-            className="bg-white h-2 rounded-full transition-all duration-300"
-            style={{ width: `${getProgressPercentage()}%` }}
-          />
+          {/* Progress bar */}
+          <div className="mt-3 bg-gray-200 rounded-full h-1.5">
+            <div
+              className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+              style={{ width: `${((currentQuestionIndex + (hasAnsweredCurrent ? 1 : 0)) / totalQuestions) * 100}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Question */}
+      {/* Question Content */}
       {currentQuestion && (
-        <div className="p-6">
-          <h4 className="text-lg font-medium text-gray-900 mb-4">
-            {currentQuestion.question}
-          </h4>
+        <div className="max-w-2xl mx-auto p-4">
+          {/* Question */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+            <h2 className="text-lg font-medium text-gray-900">
+              {currentQuestion.question}
+            </h2>
+          </div>
 
-          <div className="space-y-2">
+          {/* Answer Options */}
+          <div className="space-y-3">
             {currentQuestion.options.map((option, idx) => {
               const optionLetter = String.fromCharCode(65 + idx); // A, B, C, D
               const isSelected = selectedAnswers[currentQuestion.id] === option;
@@ -203,83 +233,58 @@ export default function QuizInterface({
               return (
                 <button
                   key={idx}
-                  onClick={() => handleSelectAnswer(currentQuestion.id, option)}
-                  disabled={isSelected}
-                  className={`w-full p-3 text-left rounded-lg border-2 transition-all ${
-                    isSelected
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                  } ${isSelected ? 'cursor-default' : 'cursor-pointer'}`}
+                  onClick={() => handleSelectAnswer(option)}
+                  disabled={hasAnsweredCurrent}
+                  className={`w-full min-h-[56px] p-4 text-left rounded-lg border-2 transition-all ${
+                    hasAnsweredCurrent
+                      ? isSelected
+                        ? 'border-blue-500 bg-blue-50 cursor-not-allowed'
+                        : 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-50'
+                      : 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100'
+                  }`}
                 >
                   <div className="flex items-center gap-3">
-                    <span className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-semibold ${
-                      isSelected
+                    <span className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg ${
+                      hasAnsweredCurrent && isSelected
                         ? 'bg-blue-500 text-white'
                         : 'bg-gray-100 text-gray-700'
                     }`}>
                       {optionLetter}
                     </span>
-                    <span className="text-gray-900">{option}</span>
-                    {isSelected && (
-                      <span className="ml-auto text-blue-600 text-sm">Selected</span>
-                    )}
+                    <span className={`text-base ${
+                      hasAnsweredCurrent && !isSelected ? 'text-gray-400' : 'text-gray-900'
+                    }`}>
+                      {option}
+                    </span>
                   </div>
                 </button>
               );
             })}
           </div>
 
-          {/* Navigation */}
-          <div className="flex justify-between items-center mt-6">
-            <button
-              onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
-              disabled={currentQuestionIndex === 0}
-              className="px-4 py-2 text-gray-600 hover:text-gray-900 disabled:text-gray-300 disabled:cursor-not-allowed"
-            >
-              ← Previous
-            </button>
-
-            <div className="text-sm text-gray-500">
-              {participantCount} student{participantCount !== 1 ? 's' : ''} participating
+          {/* Answer confirmation */}
+          {hasAnsweredCurrent && (
+            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg animate-fadeIn">
+              <p className="text-sm text-green-700 text-center font-medium">
+                Answer submitted! Moving to next question...
+              </p>
             </div>
+          )}
 
-            {currentQuestionIndex === totalQuestions - 1 ? (
-              <button
-                onClick={handleSubmitQuiz}
-                disabled={Object.keys(selectedAnswers).length === 0}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-              >
-                Submit Quiz
-              </button>
-            ) : (
-              <button
-                onClick={() => setCurrentQuestionIndex(prev => Math.min(totalQuestions - 1, prev + 1))}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900"
-              >
-                Next →
-              </button>
-            )}
+          {/* Live progress */}
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg text-center">
+            <div className="text-lg font-semibold text-gray-900">
+              {answeredCount}/{totalParticipants} answered
+            </div>
+            <div className="mt-2 bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${(answeredCount / totalParticipants) * 100}%` }}
+              />
+            </div>
           </div>
         </div>
       )}
-
-      {/* Quick Navigation Dots */}
-      <div className="px-6 pb-4 flex justify-center gap-2">
-        {quiz.questions.map((q, idx) => (
-          <button
-            key={q.id}
-            onClick={() => setCurrentQuestionIndex(idx)}
-            className={`w-3 h-3 rounded-full ${
-              idx === currentQuestionIndex
-                ? 'bg-blue-600'
-                : selectedAnswers[q.id]
-                ? 'bg-blue-300'
-                : 'bg-gray-300'
-            }`}
-            title={`Question ${idx + 1}`}
-          />
-        ))}
-      </div>
     </div>
   );
 }

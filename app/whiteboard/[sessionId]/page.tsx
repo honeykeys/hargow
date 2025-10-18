@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import useSessionStore from '@/lib/store';
+import useBackgroundTranscription from '@/hooks/useBackgroundTranscription';
 import TeacherControls from '@/components/whiteboard/TeacherControls';
 import QuestionPanel from '@/components/whiteboard/QuestionPanel';
 import MainDisplay from '@/components/whiteboard/MainDisplay';
@@ -15,7 +16,6 @@ export default function WhiteboardPage() {
   const sessionId = params.sessionId as string;
 
   const socketRef = useRef<Socket | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
 
   const {
@@ -31,6 +31,28 @@ export default function WhiteboardPage() {
     addQuizResponse,
     clearSession
   } = useSessionStore();
+
+  // Background transcription hook
+  const {
+    isRecording,
+    startRecording,
+    stopRecording,
+    error: transcriptionError
+  } = useBackgroundTranscription({
+    socket: socketRef.current,
+    sessionId,
+    onBatchAnalyzed: (mainPoints) => {
+      // Send main points via WebSocket
+      if (socketRef.current?.connected) {
+        mainPoints.forEach(pointText => {
+          socketRef.current?.emit('mainpoint:add', {
+            sessionId,
+            text: pointText
+          });
+        });
+      }
+    }
+  });
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -168,31 +190,31 @@ export default function WhiteboardPage() {
 
   // Recording handlers
   const handleToggleRecording = async () => {
-    setIsRecording(!isRecording);
+    if (isRecording) {
+      console.log('[Whiteboard] Stopping recording...');
+      stopRecording();
 
-    if (!isRecording) {
-      // Simulate starting recording
+      // Notify all clients that recording stopped
+      socketRef.current?.emit('recording:stop');
+    } else {
       console.log('[Whiteboard] Starting recording...');
 
-      // Simulate transcript updates every few seconds
-      const interval = setInterval(() => {
-        if (socketRef.current?.connected) {
-          const sampleText = `This is a simulated transcript entry at ${new Date().toLocaleTimeString()}`;
-          socketRef.current.emit('transcript:update', {
-            sessionId,
-            text: sampleText
-          });
-        }
-      }, 5000);
+      try {
+        const success = await startRecording();
 
-      // Store interval ID in ref for cleanup
-      (window as any).recordingInterval = interval;
-    } else {
-      // Stop recording
-      console.log('[Whiteboard] Stopping recording...');
-      if ((window as any).recordingInterval) {
-        clearInterval((window as any).recordingInterval);
-        delete (window as any).recordingInterval;
+        if (success) {
+          // Notify all clients that recording started
+          socketRef.current?.emit('recording:start');
+          console.log('[Whiteboard] Recording started successfully');
+        } else {
+          // Show specific error message
+          const errorMessage = transcriptionError?.message || 'Failed to start recording. Please check your microphone permissions and try again.';
+          alert(errorMessage);
+          console.error('[Whiteboard] Failed to start recording:', transcriptionError);
+        }
+      } catch (error: any) {
+        console.error('[Whiteboard] Error starting recording:', error);
+        alert(error.message || 'An unexpected error occurred. Please try again.');
       }
     }
   };
@@ -219,6 +241,7 @@ export default function WhiteboardPage() {
         onToggleRecording={handleToggleRecording}
         onGenerateQuiz={handleGenerateQuiz}
         onClearBoard={handleClearBoard}
+        onShowQRCode={() => setShowQRCode(true)}
       />
 
       {/* Main Layout */}
@@ -230,22 +253,35 @@ export default function WhiteboardPage() {
         />
 
         {/* Main Content Area */}
-        <MainDisplay sessionId={sessionId} />
+        <MainDisplay sessionId={sessionId} socket={socketRef.current} />
 
         {/* QR Code Modal */}
         {showQRCode && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold">Session QR Code</h2>
+          <div
+            className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowQRCode(false)}
+          >
+            <div
+              className="bg-white rounded-xl p-8 shadow-2xl max-w-md w-full animate-fadeIn"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Join This Session</h2>
+                  <p className="text-sm text-gray-600 mt-1">Scan QR code or enter session code</p>
+                </div>
                 <button
                   onClick={() => setShowQRCode(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-gray-400 hover:text-gray-600 text-2xl leading-none p-1"
+                  title="Close"
                 >
                   ✕
                 </button>
               </div>
               <QRCodeDisplay sessionId={sessionId} />
+              <p className="text-center text-xs text-gray-500 mt-6">
+                Students will be redirected to the join page
+              </p>
             </div>
           </div>
         )}

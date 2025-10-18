@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { io, Socket } from 'socket.io-client';
 
 export default function Home() {
   const router = useRouter();
+  const socketRef = useRef<Socket | null>(null);
 
   // Create Session state
   const [teacherName, setTeacherName] = useState('');
@@ -18,6 +20,39 @@ export default function Home() {
   const [createError, setCreateError] = useState('');
   const [joinError, setJoinError] = useState('');
 
+
+  // Connect to WebSocket on mount
+  useEffect(() => {
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+    const socket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('[Home] Connected to WebSocket');
+    });
+
+    socket.on('session:created', (data: { success: boolean; sessionId: string }) => {
+      if (data.success && data.sessionId) {
+        console.log('[Home] Session created:', data.sessionId);
+        router.push(`/whiteboard/${data.sessionId}`);
+      }
+    });
+
+    socket.on('error', (error: any) => {
+      console.error('[Home] Socket error:', error);
+      setCreateError(error.message || 'Failed to create session');
+      setIsCreating(false);
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [router]);
 
   // Auto-clear errors after 5 seconds
   useEffect(() => {
@@ -54,47 +89,28 @@ export default function Home() {
       return;
     }
 
+    if (!socketRef.current || !socketRef.current.connected) {
+      setCreateError('Not connected to server. Please refresh the page.');
+      return;
+    }
+
     setIsCreating(true);
 
-    // Create AbortController for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    // Set timeout in case server doesn't respond
+    const timeout = setTimeout(() => {
+      setCreateError('Request timed out. Please try again.');
+      setIsCreating(false);
+    }, 10000);
 
     try {
-      const response = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ teacherName: trimmedName }),
-        signal: controller.signal
-      });
+      // Emit session creation via WebSocket
+      socketRef.current.emit('session:create', trimmedName);
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Failed to create session' }));
-        throw new Error(error.message || `Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.sessionId) {
-        throw new Error('Invalid response from server');
-      }
-
-      // Redirect to whiteboard
-      router.push(`/whiteboard/${data.sessionId}`);
+      // Clear timeout when we get a response (handled in useEffect listener)
+      // The timeout will be cleared when session:created is received or on error
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          setCreateError('Request timed out. Please try again.');
-        } else {
-          setCreateError(error.message);
-        }
-      } else {
-        setCreateError('Failed to create session. Please try again.');
-      }
+      clearTimeout(timeout);
+      setCreateError('Failed to create session. Please try again.');
       setIsCreating(false);
     }
   };

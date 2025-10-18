@@ -15,6 +15,9 @@ interface SessionStore {
   session: Session | null;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
 
+  // Student-specific state
+  myQuestions: Question[];
+
   // Actions - Session Management
   setSession: (session: Session) => void;
   clearSession: () => void;
@@ -44,6 +47,10 @@ interface SessionStore {
   addParticipant: (participant: Participant) => void;
   removeParticipant: (participantId: string) => void;
   updateParticipant: (participantId: string, updates: Partial<Participant>) => void;
+
+  // Actions - Student Questions (my questions)
+  addMyQuestion: (question: Question) => void;
+  updateMyQuestion: (id: string, updates: Partial<Question>) => void;
 }
 
 const useSessionStore = create<SessionStore>()(
@@ -51,6 +58,7 @@ const useSessionStore = create<SessionStore>()(
     // Initial State
     session: null,
     connectionStatus: 'disconnected',
+    myQuestions: [],
 
     // Session Management
     setSession: (session) => set((state) => {
@@ -60,6 +68,7 @@ const useSessionStore = create<SessionStore>()(
     clearSession: () => set((state) => {
       state.session = null;
       state.connectionStatus = 'disconnected';
+      state.myQuestions = [];
     }),
 
     setConnectionStatus: (status) => set((state) => {
@@ -233,6 +242,24 @@ const useSessionStore = create<SessionStore>()(
       if (index !== -1) {
         state.session.participants[index] = {
           ...state.session.participants[index],
+          ...updates
+        };
+      }
+    }),
+
+    // Student Questions Management
+    addMyQuestion: (question) => set((state) => {
+      const exists = state.myQuestions.some(q => q.id === question.id);
+      if (!exists) {
+        state.myQuestions.push(question);
+      }
+    }),
+
+    updateMyQuestion: (id, updates) => set((state) => {
+      const index = state.myQuestions.findIndex(q => q.id === id);
+      if (index !== -1) {
+        state.myQuestions[index] = {
+          ...state.myQuestions[index],
           ...updates
         };
       }

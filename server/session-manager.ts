@@ -260,6 +260,22 @@ class SessionManager {
   }
 
   /**
+   * Clear main points from a session
+   */
+  clearMainPoints(sessionId: string): Session | null {
+    const session = this.getSession(sessionId);
+
+    if (!session) {
+      return null;
+    }
+
+    session.mainPoints = [];
+    console.log(`[SessionManager] Cleared main points for session: ${sessionId}`);
+
+    return session;
+  }
+
+  /**
    * Set active quiz for a session
    */
   setActiveQuiz(sessionId: string, quiz: Quiz): Session | null {

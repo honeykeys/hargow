@@ -85,6 +85,7 @@ export enum SessionStatus {
 export interface Participant {
   id: string;
   name: string;
+  role?: 'teacher' | 'student';
   joinedAt: Date;
   isActive: boolean;
 }
