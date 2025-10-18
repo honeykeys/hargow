@@ -1,6 +1,9 @@
-import { nanoid } from 'nanoid';
+import { nanoid, customAlphabet } from 'nanoid';
 import { Session, SessionStatus, Participant, Question, TranscriptEntry, MainPoint, Quiz } from '@/lib/types';
 import { APP_CONFIG } from '@/lib/constants';
+
+// Create custom nanoid generator for session codes
+const generateSessionCode = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 6);
 
 /**
  * SessionManager class to handle all session-related operations
@@ -41,28 +44,24 @@ class SessionManager {
   }
 
   /**
-   * Generate a unique 6-character session code
-   */
-  private generateSessionCode(): string {
-    // Generate a 6-character uppercase alphanumeric code
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return code;
-  }
-
-  /**
-   * Create a new session
+   * Create a new session with unique ID
    */
   createSession(teacherName: string): Session {
-    const sessionId = this.generateSessionCode();
+    let sessionId: string;
+    let attempts = 0;
+    const maxAttempts = 10;
 
-    // Make sure the ID is unique
-    if (this.sessions.has(sessionId)) {
-      return this.createSession(teacherName); // Recursively try again
-    }
+    // Generate unique session ID with collision detection
+    do {
+      sessionId = generateSessionCode();
+      attempts++;
+
+      if (attempts > maxAttempts) {
+        // Fallback to full nanoid if we can't generate a unique 6-char code
+        sessionId = nanoid(8).toUpperCase();
+        break;
+      }
+    } while (this.sessions.has(sessionId));
 
     const newSession: Session = {
       id: sessionId,
@@ -111,26 +110,44 @@ class SessionManager {
    * Add a participant to a session
    */
   addParticipant(sessionId: string, participant: Participant): Session | null {
-    const session = this.getSession(sessionId);
+    // Get session directly from map to avoid race conditions
+    const session = this.sessions.get(sessionId);
 
     if (!session) {
+      console.log(`[SessionManager] Session not found: ${sessionId}`);
       return null;
     }
 
-    // Check if participant limit is reached
-    if (session.participants.length >= APP_CONFIG.SESSION.MAX_PARTICIPANTS) {
-      console.log(`[SessionManager] Session full: ${sessionId}`);
+    // Check session expiry
+    const now = Date.now();
+    const sessionAge = now - session.createdAt.getTime();
+    if (sessionAge > APP_CONFIG.SESSION.SESSION_TIMEOUT_MS) {
+      console.log(`[SessionManager] Session expired: ${sessionId}`);
+      this.deleteSession(sessionId);
       return null;
     }
+
+    // Atomic check - do all checks before any modifications
+    const activeParticipants = session.participants.filter(p => p.isActive).length;
 
     // Check if participant already exists
-    const existingParticipant = session.participants.find(p => p.id === participant.id);
+    const existingIndex = session.participants.findIndex(p => p.id === participant.id);
 
-    if (existingParticipant) {
-      // Update existing participant to active
-      existingParticipant.isActive = true;
+    if (existingIndex !== -1) {
+      // Update existing participant atomically
+      session.participants[existingIndex] = {
+        ...session.participants[existingIndex],
+        isActive: true,
+        joinedAt: new Date() // Update join time
+      };
       console.log(`[SessionManager] Participant rejoined: ${participant.id} in session: ${sessionId}`);
     } else {
+      // Check participant limit only for new participants
+      if (activeParticipants >= APP_CONFIG.SESSION.MAX_PARTICIPANTS) {
+        console.log(`[SessionManager] Session full: ${sessionId} (${activeParticipants}/${APP_CONFIG.SESSION.MAX_PARTICIPANTS})`);
+        return null;
+      }
+
       // Add new participant
       session.participants.push(participant);
       console.log(`[SessionManager] Added participant: ${participant.id} to session: ${sessionId}`);
@@ -210,12 +227,18 @@ class SessionManager {
       return null;
     }
 
-    session.transcript.push(entry);
+    // Check and limit transcript size BEFORE adding
+    const maxEntries = 1000;
+    const keepEntries = 900;
 
-    // Limit transcript size
-    if (session.transcript.length > 1000) {
-      session.transcript = session.transcript.slice(-900); // Keep last 900 entries
+    if (session.transcript.length >= maxEntries) {
+      // Remove oldest entries first to make room
+      session.transcript = session.transcript.slice(-(keepEntries - 1));
+      console.log(`[SessionManager] Transcript trimmed for session: ${sessionId}`);
     }
+
+    // Now safe to add the new entry
+    session.transcript.push(entry);
 
     return session;
   }

@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "socket:server": "tsx server/index.ts",
+    "dev:all": "concurrently \"npm run dev\" \"npm run socket:server\""
   },
   "dependencies": {
     "date-fns": "^4.1.0",
-    "nanoid": "^5.1.6",
+    "nanoid": "^3.3.7",
     "next": "15.5.6",
     "qrcode": "^1.5.4",
     "react": "19.1.0",
@@ -26,9 +28,11 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "15.5.6",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }
