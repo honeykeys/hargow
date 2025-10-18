@@ -103,9 +103,17 @@ function useBackgroundTranscription({
     transcriptBufferRef.current += ' ' + segment.text;
     batchBufferRef.current += ' ' + segment.text;
 
+    // Emit transcript to server in real-time
+    if (socket && segment.text.trim().length > 0) {
+      socket.emit('transcript:update', {
+        sessionId,
+        text: segment.text.trim()
+      });
+    }
+
     // Log transcript (but don't display it)
     console.log('[Transcript]', segment.text);
-  }, []);
+  }, [socket, sessionId]);
 
   /**
    * Start recording and transcription

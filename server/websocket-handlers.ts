@@ -160,6 +160,7 @@ export async function handleSessionJoin(
     socket.data.sessionId = sessionId.toUpperCase();
     socket.data.userName = userName;
     socket.data.participantId = participant.id;
+    socket.data.isTeacher = participant.role === 'teacher';
 
     // Send current session state to joining client
     socket.emit('session:joined', {
@@ -359,7 +360,7 @@ export async function handleQuestionUpvote(
 }
 
 /**
- * Handle quiz generation (stub for now)
+ * Handle quiz generation using Perplexity API
  */
 export async function handleQuizGenerate(
   io: SocketIOServer,
@@ -395,69 +396,98 @@ export async function handleQuizGenerate(
 
     console.log(`[WebSocket] Generating quiz for session ${sessionId}`);
 
-    // Create stub quiz for now
-    const quizQuestions = [
-      {
-        id: nanoid(),
-        question: 'What is the capital of France?',
-        options: ['London', 'Berlin', 'Paris', 'Madrid'],
-        correctIndex: 2,
-        explanation: 'Paris is the capital and largest city of France.'
-      },
-      {
-        id: nanoid(),
-        question: 'What is 2 + 2?',
-        options: ['3', '4', '5', '6'],
-        correctIndex: 1,
-        explanation: '2 + 2 equals 4.'
-      },
-      {
-        id: nanoid(),
-        question: 'Which planet is known as the Red Planet?',
-        options: ['Venus', 'Mars', 'Jupiter', 'Saturn'],
-        correctIndex: 1,
-        explanation: 'Mars is known as the Red Planet due to its reddish appearance.'
-      }
-    ];
-
-    const quiz: any = {
-      id: nanoid(),
-      generatedAt: new Date(),
-      questions: quizQuestions.map(q => ({
-        ...q,
-        correctAnswer: q.options[q.correctIndex] // Add correctAnswer for easy comparison
-      })),
-      responses: [],
-      analytics: {
-        totalResponses: 0,
-        questionStats: new Map(),
-        knowledgeGaps: [],
-        averageScore: 0
-      },
-      status: QuizStatus.ACTIVE
-    };
-
-    // Set active quiz in session
-    const updatedSession = sessionManager.setActiveQuiz(sessionId, quiz);
-
-    if (!updatedSession) {
-      socket.emit('error', {
-        message: ERROR_MESSAGES.QUIZ_GENERATION_FAILED
-      });
-      return;
-    }
-
-    // Broadcast quiz to all participants
-    io.to(sessionId).emit(SOCKET_EVENTS.QUIZ_GENERATED, quiz);
-    io.to(sessionId).emit('quiz:started', quiz); // For student clients
-
-    socket.emit('quiz:generated', {
-      success: true,
-      quizId: quiz.id,
-      message: SUCCESS_MESSAGES.QUIZ_GENERATED
+    // Emit generating status
+    socket.emit('quiz:generating', {
+      message: 'Generating quiz based on lecture content...'
     });
 
-    console.log(`[WebSocket] Quiz ${quiz.id} generated for session ${sessionId}`);
+    // Call the API route to generate quiz
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const response = await fetch(`${apiUrl}/api/generate-quiz`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          numQuestions: 3
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('[WebSocket] Quiz generation API error:', errorData);
+
+        // Handle specific error codes
+        if (errorData.code === 'INSUFFICIENT_CONTENT') {
+          socket.emit('error', {
+            message: errorData.error || 'Not enough lecture content to generate a quiz yet.',
+            code: 'INSUFFICIENT_CONTENT'
+          });
+          return;
+        }
+
+        throw new Error(errorData.error || `API returned ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success || !result.questions) {
+        throw new Error('Invalid response from quiz generation API');
+      }
+
+      // Add IDs to questions and prepare quiz object
+      const quizQuestions = result.questions.map((q: any) => ({
+        id: nanoid(),
+        question: q.question,
+        options: q.options,
+        correctIndex: q.correctIndex,
+        correctAnswer: q.options[q.correctIndex], // For easy comparison
+        explanation: q.explanation
+      }));
+
+      const quiz: Quiz = {
+        id: nanoid(),
+        generatedAt: new Date(),
+        questions: quizQuestions,
+        responses: new Map(),
+        analytics: {
+          totalResponses: 0,
+          questionStats: new Map(),
+          knowledgeGaps: [],
+          averageScore: 0
+        },
+        status: QuizStatus.ACTIVE
+      };
+
+      // Set active quiz in session
+      const updatedSession = sessionManager.setActiveQuiz(sessionId, quiz);
+
+      if (!updatedSession) {
+        socket.emit('error', {
+          message: ERROR_MESSAGES.QUIZ_GENERATION_FAILED
+        });
+        return;
+      }
+
+      // Broadcast quiz to all participants
+      io.to(sessionId).emit(SOCKET_EVENTS.QUIZ_GENERATED, quiz);
+      io.to(sessionId).emit('quiz:started', quiz); // For student clients
+
+      socket.emit('quiz:generated', {
+        success: true,
+        quizId: quiz.id,
+        message: SUCCESS_MESSAGES.QUIZ_GENERATED
+      });
+
+      console.log(`[WebSocket] Quiz ${quiz.id} generated for session ${sessionId} with ${quizQuestions.length} questions`);
+    } catch (apiError) {
+      console.error('[WebSocket] Error calling quiz generation API:', apiError);
+      socket.emit('error', {
+        message: apiError instanceof Error ? apiError.message : 'Failed to generate quiz. Please try again.'
+      });
+    }
   } catch (error) {
     console.error('[WebSocket] Error generating quiz:', error);
     socket.emit('error', {
@@ -704,7 +734,8 @@ export async function handleRecordingStarted(
 export async function handleRecordingStopped(
   io: SocketIOServer,
   socket: Socket,
-  clientSessions: Map<string, string>
+  clientSessions: Map<string, string>,
+  data?: { fullTranscript?: string; duration?: number }
 ) {
   try {
     const sessionId = clientSessions.get(socket.id);
@@ -722,6 +753,21 @@ export async function handleRecordingStopped(
         message: ERROR_MESSAGES.TEACHER_ONLY
       });
       return;
+    }
+
+    // If full transcript is provided, save it as a final entry
+    if (data?.fullTranscript && data.fullTranscript.trim().length > 0) {
+      const finalEntry: TranscriptEntry = {
+        id: nanoid(),
+        speaker: socket.data.userName || 'Teacher',
+        text: data.fullTranscript.trim(),
+        timestamp: new Date()
+      };
+
+      // Save to session manager
+      sessionManager.addTranscriptEntry(sessionId, finalEntry);
+
+      console.log(`[WebSocket] Saved full transcript (${data.fullTranscript.length} chars) for session ${sessionId}`);
     }
 
     // Broadcast recording stopped to all participants
@@ -768,6 +814,100 @@ export async function handleBoardClear(
     console.log(`[WebSocket] Board cleared in session ${sessionId}`);
   } catch (error) {
     console.error('[WebSocket] Error clearing board:', error);
+  }
+}
+
+/**
+ * Handle question answer request
+ */
+export async function handleQuestionAnswer(
+  io: SocketIOServer,
+  socket: Socket,
+  data: { questionId: string; sessionId: string },
+  clientSessions: Map<string, string>
+) {
+  try {
+    const sessionId = clientSessions.get(socket.id);
+
+    if (!sessionId) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.NOT_IN_SESSION
+      });
+      return;
+    }
+
+    // Verify the sessionId matches
+    if (sessionId !== data.sessionId) {
+      socket.emit('error', {
+        message: 'Session ID mismatch'
+      });
+      return;
+    }
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      socket.emit('error', {
+        message: ERROR_MESSAGES.SESSION_NOT_FOUND
+      });
+      return;
+    }
+
+    // Find the question
+    const question = session.questions.find(q => q.id === data.questionId);
+    if (!question) {
+      socket.emit('error', {
+        message: 'Question not found'
+      });
+      return;
+    }
+
+    console.log(`[WebSocket] Answering question ${data.questionId} in session ${sessionId}`);
+
+    // Call the API route to get the answer
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const response = await fetch(`${apiUrl}/api/answer-question`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          questionId: question.id,
+          questionText: question.text,
+          sessionId: sessionId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Update question status in session
+      question.status = QuestionStatus.ANSWERED;
+      question.answer = result.answer;
+      question.citations = result.citations || [];
+
+      // Broadcast the answer to all participants
+      io.to(sessionId).emit('question:answered', {
+        questionId: question.id,
+        answer: result.answer,
+        citations: result.citations || []
+      });
+
+      console.log(`[WebSocket] Question ${data.questionId} answered successfully`);
+    } catch (error) {
+      console.error('[WebSocket] Error calling answer API:', error);
+      socket.emit('error', {
+        message: 'Failed to generate answer. Please try again.'
+      });
+    }
+  } catch (error) {
+    console.error('[WebSocket] Error answering question:', error);
+    socket.emit('error', {
+      message: ERROR_MESSAGES.UNKNOWN_ERROR
+    });
   }
 }
 

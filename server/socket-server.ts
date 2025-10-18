@@ -8,6 +8,7 @@ import {
   handleSessionLeave,
   handleQuestionSubmit,
   handleQuestionUpvote,
+  handleQuestionAnswer,
   handleQuizGenerate,
   handleQuizAnswer,
   handleTranscriptUpdate,
@@ -102,6 +103,11 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
       await handleQuestionUpvote(io!, socket, questionId, clientSessions);
     });
 
+    // Handle question answer request
+    socket.on('question:answer', async (data: { questionId: string; sessionId: string }) => {
+      await handleQuestionAnswer(io!, socket, data, clientSessions);
+    });
+
     // Handle quiz generation
     socket.on(SOCKET_EVENTS.GENERATE_QUIZ, async () => {
       await handleQuizGenerate(io!, socket, clientSessions);
@@ -154,6 +160,11 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
     // Handle recording stopped
     socket.on('recording:stop', async () => {
       await handleRecordingStopped(io!, socket, clientSessions);
+    });
+
+    // Handle recording stopped with data (from useBackgroundTranscription)
+    socket.on('recording:stopped', async (data: any) => {
+      await handleRecordingStopped(io!, socket, clientSessions, data);
     });
 
     // Handle board clear
