@@ -1,103 +1,268 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const router = useRouter();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Create Session state
+  const [teacherName, setTeacherName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Join Session state
+  const [sessionCode, setSessionCode] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+
+  // Error/success messages
+  const [createError, setCreateError] = useState('');
+  const [joinError, setJoinError] = useState('');
+
+
+  // Auto-clear errors after 5 seconds
+  useEffect(() => {
+    if (createError) {
+      const timer = setTimeout(() => setCreateError(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [createError]);
+
+  useEffect(() => {
+    if (joinError) {
+      const timer = setTimeout(() => setJoinError(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [joinError]);
+
+  const handleCreateSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Prevent double-submission
+    if (isCreating) return;
+
+    setCreateError('');
+
+    const trimmedName = teacherName.trim();
+
+    if (!trimmedName) {
+      setCreateError('Please enter your name');
+      return;
+    }
+
+    if (trimmedName.length < 2 || trimmedName.length > 50) {
+      setCreateError('Name must be between 2 and 50 characters');
+      return;
+    }
+
+    setIsCreating(true);
+
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ teacherName: trimmedName }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Failed to create session' }));
+        throw new Error(error.message || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.sessionId) {
+        throw new Error('Invalid response from server');
+      }
+
+      // Redirect to whiteboard
+      router.push(`/whiteboard/${data.sessionId}`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          setCreateError('Request timed out. Please try again.');
+        } else {
+          setCreateError(error.message);
+        }
+      } else {
+        setCreateError('Failed to create session. Please try again.');
+      }
+      setIsCreating(false);
+    }
+  };
+
+  const handleJoinSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Prevent double-submission
+    if (isJoining) return;
+
+    setJoinError('');
+
+    const cleanedCode = sessionCode.trim().toUpperCase();
+
+    if (!cleanedCode) {
+      setJoinError('Please enter a session code');
+      return;
+    }
+
+    if (cleanedCode.length !== 6 || !/^[A-Z0-9]+$/.test(cleanedCode)) {
+      setJoinError('Session code must be 6 alphanumeric characters (e.g., ABC123)');
+      return;
+    }
+
+    setIsJoining(true);
+
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    try {
+      // Check if session exists
+      const response = await fetch(`/api/sessions/${cleanedCode}`, {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Session not found. Please check the code and try again.');
+        } else if (response.status === 410) {
+          throw new Error('This session has ended.');
+        }
+        throw new Error(`Failed to join session (Error: ${response.status})`);
+      }
+
+      const result = await response.json();
+      const session = result.data || result;
+
+      if (!session) {
+        throw new Error('Invalid response from server');
+      }
+
+      if (session.status === 'ENDED') {
+        throw new Error('This session has ended');
+      }
+
+      // Redirect to student view
+      router.push(`/student/${cleanedCode}`);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          setJoinError('Request timed out. Please check your connection and try again.');
+        } else {
+          setJoinError(error.message);
+        }
+      } else {
+        setJoinError('Failed to join session. Please try again.');
+      }
+      setIsJoining(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="max-w-4xl w-full">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-black mb-2">Hargow</h1>
+          <p className="text-gray-600">Classroom Engagement Platform</p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Create Session */}
+          <div className="bg-white p-6 rounded border border-gray-200">
+            <h2 className="text-xl font-semibold mb-4 text-black">Create Session</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Start a new classroom session as a teacher
+            </p>
+
+            <form onSubmit={handleCreateSession}>
+              <div className="mb-4">
+                <label htmlFor="teacherName" className="block text-sm font-medium text-gray-700 mb-1">
+                  Your Name
+                </label>
+                <input
+                  type="text"
+                  id="teacherName"
+                  value={teacherName}
+                  onChange={(e) => setTeacherName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  placeholder="Enter your name"
+                  disabled={isCreating}
+                  maxLength={50}
+                />
+              </div>
+
+              {createError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                  {createError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isCreating}
+                className="w-full py-2 px-4 bg-black text-white rounded hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {isCreating ? 'Creating...' : 'Create Session'}
+              </button>
+            </form>
+          </div>
+
+          {/* Join Session */}
+          <div className="bg-white p-6 rounded border border-gray-200">
+            <h2 className="text-xl font-semibold mb-4 text-black">Join Session</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Join an existing session as a student
+            </p>
+
+            <form onSubmit={handleJoinSession}>
+              <div className="mb-4">
+                <label htmlFor="sessionCode" className="block text-sm font-medium text-gray-700 mb-1">
+                  Session Code
+                </label>
+                <input
+                  type="text"
+                  id="sessionCode"
+                  value={sessionCode}
+                  onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-gray-400 font-mono text-center text-lg"
+                  placeholder="ABC123"
+                  disabled={isJoining}
+                  maxLength={6}
+                />
+              </div>
+
+              {joinError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                  {joinError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isJoining}
+                className="w-full py-2 px-4 bg-black text-white rounded hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {isJoining ? 'Joining...' : 'Join Session'}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div className="mt-8 text-center text-sm text-gray-500">
+          <p>Sessions expire after 3 hours of inactivity</p>
+        </div>
+      </div>
     </div>
   );
 }
