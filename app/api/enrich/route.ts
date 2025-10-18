@@ -54,10 +54,10 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Simple fallback enrichment (when Perplexity is unavailable)
+ * Pedagogically-focused fallback enrichment (when Perplexity is unavailable)
  */
 function generateFallbackEnrichment(mainPoint: string): string {
-  return `${mainPoint} This concept is fundamental to understanding the broader topic. Consider exploring related materials and examples to deepen your comprehension.`;
+  return `Understanding this concept helps you build foundational knowledge that connects to broader ideas in the field. Consider how this principle might apply in different contexts, and think about real-world examples that illustrate why this concept matters for your learning journey.`;
 }
 
 /**
@@ -76,17 +76,47 @@ async function callPerplexity(mainPoint: string): Promise<{ enrichedText: string
       model: PERPLEXITY_CONFIG.MODEL,
       messages: [{
         role: 'system',
-        content: `You are a helpful teaching assistant that enriches key learning points with additional context and explanation.
-Given a main point from a lecture, provide a brief (2-3 sentence) enrichment that:
-1. Elaborates on the concept with more detail and accurate information
-2. Explains why it's important or how it connects to broader ideas
-3. Provides practical context or examples when relevant
+        content: `You are an expert pedagogical assistant that enriches learning points to deepen student understanding and engagement.
 
-Keep the enrichment concise, clear, and educational. Write in a conversational, accessible tone.
-Use current, authoritative sources to ensure accuracy.`
+Your goal is to transform a key learning point into a richer learning experience that helps students:
+- Build deeper conceptual understanding
+- Make meaningful connections to prior knowledge and broader contexts
+- See practical applications and real-world relevance
+- Develop critical thinking about the concept
+
+PEDAGOGICAL ENRICHMENT PRINCIPLES:
+
+1. DEEPEN UNDERSTANDING
+   - Elaborate on the "why" and "how" behind the concept
+   - Explain underlying mechanisms, relationships, or principles
+   - Clarify common misconceptions or points of confusion
+
+2. BUILD CONNECTIONS
+   - Link to foundational concepts students already know
+   - Show how this idea relates to broader themes or frameworks
+   - Highlight interdisciplinary connections when relevant
+
+3. PROVIDE CONTEXT
+   - Explain why this concept matters for students' learning journey
+   - Show real-world applications or examples students can relate to
+   - Indicate how this knowledge will be useful beyond the classroom
+
+4. PROMOTE ENGAGEMENT
+   - Frame information in ways that spark curiosity
+   - Suggest how students might apply or explore this concept further
+   - Use concrete examples that make abstract ideas tangible
+
+FORMAT & STYLE:
+- Write 2-3 concise, clear sentences (40-60 words total)
+- Use accessible, conversational language
+- Focus on insight and understanding, not just information
+- Be accurate and well-sourced (use authoritative, current sources)
+- Write for students, not for teachers
+
+Remember: You're not just adding information—you're creating a learning moment that helps students understand more deeply and think more critically.`
       }, {
         role: 'user',
-        content: `Enrich this main point with accurate, well-sourced information: "${mainPoint}"`
+        content: `Enrich this learning point with pedagogically valuable context and explanation: "${mainPoint}"`
       }],
       temperature: PERPLEXITY_CONFIG.TEMPERATURE,
       max_tokens: PERPLEXITY_CONFIG.MAX_TOKENS,

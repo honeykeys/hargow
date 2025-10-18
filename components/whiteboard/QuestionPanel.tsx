@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import useSessionStore from '@/lib/store';
 
 interface QuestionPanelProps {
@@ -13,6 +13,16 @@ export default function QuestionPanel({ socket, sessionId }: QuestionPanelProps)
   const [answeringQuestionId, setAnsweringQuestionId] = useState<string | null>(null);
 
   const questions = session?.questions || [];
+
+  // Clear answering state when question status changes to answered
+  useEffect(() => {
+    if (answeringQuestionId) {
+      const question = questions.find(q => q.id === answeringQuestionId);
+      if (question && question.status === 'answered') {
+        setAnsweringQuestionId(null);
+      }
+    }
+  }, [questions, answeringQuestionId]);
 
   // Group questions by similarity (simplified - in production, use NLP)
   const groupQuestions = () => {
@@ -40,9 +50,13 @@ export default function QuestionPanel({ socket, sessionId }: QuestionPanelProps)
     // Emit event to server to get AI answer
     socket?.emit('question:answer', {
       sessionId,
-      questionId,
-      context: session?.transcript?.slice(-10).map(t => t.text).join(' ') || ''
+      questionId
     });
+
+    // Clear answering state after timeout (in case answer event doesn't arrive)
+    setTimeout(() => {
+      setAnsweringQuestionId(null);
+    }, 30000); // 30 second timeout
   };
 
   const formatTimestamp = (timestamp: Date | string) => {

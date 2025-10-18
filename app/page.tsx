@@ -96,6 +96,9 @@ export default function Home() {
 
     setIsCreating(true);
 
+    // Save teacher name to localStorage for whiteboard page
+    localStorage.setItem('teacherName', trimmedName);
+
     // Set timeout in case server doesn't respond
     const timeout = setTimeout(() => {
       setCreateError('Request timed out. Please try again.');

@@ -7,6 +7,8 @@ import useSessionStore from '@/lib/store';
 import QuestionForm from '@/components/student/QuestionForm';
 import QuestionList from '@/components/student/QuestionList';
 import QuizInterface from '@/components/student/QuizInterface';
+import SearchInterface from '@/components/student/SearchInterface';
+import StudentWhiteboardDisplay from '@/components/student/StudentWhiteboardDisplay';
 
 export default function StudentPage() {
   const params = useParams();
@@ -31,6 +33,7 @@ export default function StudentPage() {
     setActiveQuiz,
     addMyQuestion,
     updateMyQuestion,
+    updateQuestion,
     clearSession
   } = useSessionStore();
 
@@ -120,9 +123,24 @@ export default function StudentPage() {
       addMyQuestion(question);
     });
 
+    socket.on('question:received', (question) => {
+      console.log('[Student] Question received from another student:', question);
+      // This adds the question to the session's question list
+      // (will be visible in the "All Questions" section)
+    });
+
     socket.on('question:answered', (data) => {
       console.log('[Student] Question answered:', data);
+
+      // Update in "My Questions"
       updateMyQuestion(data.questionId, {
+        status: 'answered',
+        answer: data.answer,
+        citations: data.citations
+      });
+
+      // Update in the main session questions list
+      updateQuestion(data.questionId, {
         status: 'answered',
         answer: data.answer,
         citations: data.citations
@@ -239,12 +257,25 @@ export default function StudentPage() {
 
   // Main student interface
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-lg font-semibold text-gray-900">Session {sessionId}</h1>
+      <div className="bg-white border-b border-gray-200 flex-shrink-0">
+        <div className="px-6 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-6">
+              <h1 className="text-lg font-semibold text-gray-900">Session {sessionId}</h1>
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <span>{session?.participants?.length || 0} participants</span>
+                {session?.status && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    session.status === 'ACTIVE' ? 'bg-green-100 text-green-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {session.status}
+                  </span>
+                )}
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               {/* Connection Status */}
               <div className="flex items-center gap-1.5 text-sm">
@@ -261,39 +292,45 @@ export default function StudentPage() {
               </div>
             </div>
           </div>
-
-          {/* Session Info */}
-          <div className="flex items-center gap-4 text-sm text-gray-600">
-            <span>{session?.participants?.length || 0} participants</span>
-            {session?.status && (
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                session.status === 'ACTIVE' ? 'bg-green-100 text-green-700' :
-                'bg-gray-100 text-gray-700'
-              }`}>
-                {session.status}
-              </span>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-2xl mx-auto p-4 pb-20">
-        {/* Question Form */}
-        <div className="mb-6">
+      {/* Main Content - Two Column Layout */}
+      <div className="flex-1 flex gap-6 p-6 overflow-hidden">
+        {/* Left Side - Whiteboard (2/3 width) */}
+        <div className="flex-1 min-w-0">
+          <StudentWhiteboardDisplay socket={socketRef.current} />
+        </div>
+
+        {/* Right Sidebar - Search, Questions, etc. (1/3 width) */}
+        <div className="w-96 flex-shrink-0 space-y-4 overflow-y-auto">
+          {/* Search Interface */}
+          <SearchInterface />
+
+          {/* Question Form */}
           <QuestionForm
             socket={socketRef.current}
             sessionId={sessionId}
             studentName={studentName}
           />
-        </div>
 
-        {/* Question List */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3 px-1">
-            Your Questions ({myQuestions.length})
-          </h2>
-          <QuestionList questions={myQuestions} />
+          {/* All Questions */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">
+              All Questions ({session?.questions?.length || 0})
+            </h2>
+            <QuestionList questions={session?.questions || []} />
+          </div>
+
+          {/* Your Questions */}
+          {myQuestions.length > 0 && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <h2 className="text-sm font-semibold text-gray-700 mb-3">
+                Your Questions ({myQuestions.length})
+              </h2>
+              <QuestionList questions={myQuestions} />
+            </div>
+          )}
         </div>
       </div>
     </div>

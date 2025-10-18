@@ -91,7 +91,16 @@ export class DeepgramService {
             }
           });
 
+          this.mediaRecorder.addEventListener('stop', () => {
+            console.log('[Deepgram] MediaRecorder stopped');
+          });
+
+          this.mediaRecorder.addEventListener('start', () => {
+            console.log('[Deepgram] MediaRecorder started');
+          });
+
           // Start recording with 250ms chunks (Deepgram recommendation: 100-250ms)
+          // This will continuously call dataavailable every 250ms until stop() is called
           this.mediaRecorder.start(250);
           console.log('[Deepgram] Recording started with 250ms chunks');
         }
@@ -184,9 +193,10 @@ export class DeepgramService {
   }
 }
 
-// Singleton instance
-let deepgramInstance: DeepgramService | null = null;
-
+/**
+ * Create a new Deepgram service instance
+ * Each recording session should have its own instance to avoid state conflicts
+ */
 export function getDeepgramService(): DeepgramService {
   const apiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
 
@@ -194,9 +204,6 @@ export function getDeepgramService(): DeepgramService {
     throw new Error('Deepgram API key not configured');
   }
 
-  if (!deepgramInstance) {
-    deepgramInstance = new DeepgramService(apiKey);
-  }
-
-  return deepgramInstance;
+  // Always create a new instance - don't reuse singleton
+  return new DeepgramService(apiKey);
 }

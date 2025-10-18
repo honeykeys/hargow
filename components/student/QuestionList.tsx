@@ -53,6 +53,12 @@ export default function QuestionList({ questions }: QuestionListProps) {
                   {question.text}
                 </p>
                 <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                  {question.studentName && (
+                    <>
+                      <span className="font-medium text-gray-600">{question.studentName}</span>
+                      <span>•</span>
+                    </>
+                  )}
                   <span>{format(new Date(question.timestamp), 'h:mm a')}</span>
                   {question.status === 'answered' && (
                     <>

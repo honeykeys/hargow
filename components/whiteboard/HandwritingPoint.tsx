@@ -7,14 +7,22 @@ interface HandwritingPointProps {
   text: string;
   index: number;
   onEnrich: (text: string) => void;
+  onExplain?: (text: string) => void;
   isEnriching?: boolean;
+  isExplaining?: boolean;
+  hideEnrichButton?: boolean;
+  hideExplainButton?: boolean;
 }
 
 export default function HandwritingPoint({
   text,
   index,
   onEnrich,
-  isEnriching = false
+  onExplain,
+  isEnriching = false,
+  isExplaining = false,
+  hideEnrichButton = false,
+  hideExplainButton = false
 }: HandwritingPointProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [animationComplete, setAnimationComplete] = useState(false);
@@ -46,6 +54,12 @@ export default function HandwritingPoint({
   const handleEnrich = () => {
     if (!isEnriching) {
       onEnrich(text);
+    }
+  };
+
+  const handleExplain = () => {
+    if (!isExplaining && onExplain) {
+      onExplain(text);
     }
   };
 
@@ -127,38 +141,76 @@ export default function HandwritingPoint({
             ))}
           </motion.p>
 
-          {/* Enrich button - only show after animation and on hover */}
-          {animationComplete && isHovered && (
-            <motion.button
+          {/* Action buttons - only show after animation and on hover */}
+          {animationComplete && isHovered && (!hideEnrichButton || !hideExplainButton) && (
+            <motion.div
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
-              onClick={handleEnrich}
-              disabled={isEnriching}
-              className={`
-                mt-2 px-3 py-1 text-xs font-medium rounded-full
-                transition-all duration-200 ease-in-out
-                ${isEnriching
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800'
-                }
-              `}
+              className="mt-2 flex items-center gap-2"
             >
-              {isEnriching ? (
-                <span className="flex items-center gap-1">
-                  <span className="inline-block w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                  Enriching...
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                  Enrich
-                </span>
+              {/* Enrich button */}
+              {!hideEnrichButton && (
+                <button
+                  onClick={handleEnrich}
+                  disabled={isEnriching}
+                  className={`
+                    px-3 py-1 text-xs font-medium rounded-full
+                    transition-all duration-200 ease-in-out
+                    ${isEnriching
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-800'
+                    }
+                  `}
+                >
+                  {isEnriching ? (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      Enriching...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Enrich
+                    </span>
+                  )}
+                </button>
               )}
-            </motion.button>
+
+              {/* Explain button */}
+              {!hideExplainButton && onExplain && (
+                <button
+                  onClick={handleExplain}
+                  disabled={isExplaining}
+                  className={`
+                    px-3 py-1 text-xs font-medium rounded-full
+                    transition-all duration-200 ease-in-out
+                    ${isExplaining
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200 hover:text-green-800'
+                    }
+                  `}
+                >
+                  {isExplaining ? (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      Explaining...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Explain
+                    </span>
+                  )}
+                </button>
+              )}
+            </motion.div>
           )}
         </div>
       </div>

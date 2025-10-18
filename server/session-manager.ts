@@ -1,6 +1,7 @@
 import { nanoid, customAlphabet } from 'nanoid';
 import { Session, SessionStatus, Participant, Question, TranscriptEntry, MainPoint, Quiz } from '@/lib/types';
 import { APP_CONFIG } from '@/lib/constants';
+import { DEMO_MAIN_POINTS } from '@/lib/demo-lecture-data';
 
 // Create custom nanoid generator for session codes
 const generateSessionCode = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 6);
@@ -63,21 +64,32 @@ class SessionManager {
       }
     } while (this.sessions.has(sessionId));
 
+    // Pre-populate with demo lecture main points
+    const demoMainPoints: MainPoint[] = DEMO_MAIN_POINTS.map((point, index) => ({
+      id: `demo-${index}-${nanoid(6)}`,
+      text: point.text,
+      timestamp: new Date(),
+      enrichedText: point.enrichedText,
+      citations: point.citations
+    }));
+
     const newSession: Session = {
       id: sessionId,
       teacherName,
       createdAt: new Date(),
       participants: [],
       transcript: [],
-      mainPoints: [],
+      mainPoints: demoMainPoints, // Pre-populate with demo points
       questions: [],
       activeQuiz: undefined,
-      status: SessionStatus.WAITING
+      status: SessionStatus.WAITING,
+      studentNumberMap: {},
+      nextStudentNumber: 1
     };
 
     this.sessions.set(sessionId, newSession);
 
-    console.log(`[SessionManager] Created new session: ${sessionId} for teacher: ${teacherName}`);
+    console.log(`[SessionManager] Created new session: ${sessionId} for teacher: ${teacherName} with ${demoMainPoints.length} demo main points`);
 
     return newSession;
   }
@@ -253,6 +265,14 @@ class SessionManager {
       return null;
     }
 
+    // Limit to 50 main points - auto-archive older ones
+    const MAX_MAIN_POINTS = 50;
+    if (session.mainPoints.length >= MAX_MAIN_POINTS) {
+      // Keep most recent points, remove oldest
+      session.mainPoints = session.mainPoints.slice(-(MAX_MAIN_POINTS - 1));
+      console.log(`[SessionManager] Main points limit reached, removed oldest point from session: ${sessionId}`);
+    }
+
     session.mainPoints.push(point);
     console.log(`[SessionManager] Added main point to session: ${sessionId}`);
 
@@ -337,6 +357,32 @@ class SessionManager {
       activeSessions,
       totalParticipants
     };
+  }
+
+  /**
+   * Get or assign anonymized student name
+   */
+  getAnonymizedStudentName(sessionId: string, studentId: string): string {
+    const session = this.getSession(sessionId);
+
+    if (!session) {
+      return 'Anonymous';
+    }
+
+    // Check if student already has a number
+    if (studentId in session.studentNumberMap) {
+      const number = session.studentNumberMap[studentId];
+      return `Student ${number}`;
+    }
+
+    // Assign new number
+    const number = session.nextStudentNumber;
+    session.studentNumberMap[studentId] = number;
+    session.nextStudentNumber++;
+
+    console.log(`[SessionManager] Assigned Student ${number} to ${studentId} in session ${sessionId}`);
+
+    return `Student ${number}`;
   }
 
   /**

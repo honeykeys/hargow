@@ -105,6 +105,13 @@ const useSessionStore = create<SessionStore>()(
 
       const exists = state.session.mainPoints.some(p => p.id === point.id);
       if (!exists) {
+        // Limit to 50 main points - remove oldest if exceeding limit
+        const MAX_MAIN_POINTS = 50;
+        if (state.session.mainPoints.length >= MAX_MAIN_POINTS) {
+          // Keep most recent points, remove oldest
+          state.session.mainPoints = state.session.mainPoints.slice(-(MAX_MAIN_POINTS - 1));
+          console.log('[Store] Main points limit reached, removed oldest point');
+        }
         state.session.mainPoints.push(point);
       }
     }),

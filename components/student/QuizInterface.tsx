@@ -46,7 +46,7 @@ export default function QuizInterface({ socket, sessionId }: QuizInterfaceProps)
     }
   }, [currentQuestionIndex, hasAnsweredCurrent, hasSubmittedQuiz]);
 
-  const handleSelectAnswer = (answer: string) => {
+  const handleSelectAnswer = (answer: string, optionIndex: number) => {
     if (hasAnsweredCurrent || !currentQuestion || hasSubmittedQuiz) return;
 
     // Save answer
@@ -57,14 +57,15 @@ export default function QuizInterface({ socket, sessionId }: QuizInterfaceProps)
     setSelectedAnswers(updatedAnswers);
     setHasAnsweredCurrent(true);
 
+    // Check if answer is correct
+    const isCorrect = optionIndex === currentQuestion.correctIndex;
+
     // Emit answer immediately to server
     if (socket && socket.connected) {
       socket.emit('quiz:answer', {
-        sessionId,
-        quizId: activeQuiz?.id,
         questionId: currentQuestion.id,
-        answer: answer,
-        timestamp: new Date().toISOString()
+        selectedIndex: optionIndex,
+        isCorrect: isCorrect
       });
     }
 
@@ -233,7 +234,7 @@ export default function QuizInterface({ socket, sessionId }: QuizInterfaceProps)
               return (
                 <button
                   key={idx}
-                  onClick={() => handleSelectAnswer(option)}
+                  onClick={() => handleSelectAnswer(option, idx)}
                   disabled={hasAnsweredCurrent}
                   className={`w-full min-h-[56px] p-4 text-left rounded-lg border-2 transition-all ${
                     hasAnsweredCurrent

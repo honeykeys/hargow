@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDeepgramService, TranscriptSegment } from '@/lib/api/deepgram';
 import { Socket } from 'socket.io-client';
 
-const ANALYSIS_INTERVAL = 10000; // 10 seconds (for demo responsiveness)
-const MIN_BUFFER_LENGTH = 50; // Minimum characters before analysis
+const ANALYSIS_INTERVAL = 2000; // 2 seconds (for near real-time demo)
+const MIN_BUFFER_LENGTH = 20; // Minimum characters before analysis
 
 interface UseBackgroundTranscriptionOptions {
   socket: Socket | null;

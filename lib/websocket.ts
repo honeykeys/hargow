@@ -27,7 +27,7 @@ interface ServerToClientEvents {
   'participants:count': (data: { count: number }) => void;
 
   // Question events
-  'question_received': (question: Question) => void;
+  'question:received': (question: Question) => void;
   'question:updated': (question: Question) => void;
   'question:submitted': (data: { success: boolean; questionId: string; message: string }) => void;
 

@@ -117,6 +117,8 @@ export interface Session {
   questions: Question[];
   activeQuiz?: Quiz;
   status: SessionStatus;
+  studentNumberMap: Record<string, number>; // Maps studentId to anonymized number
+  nextStudentNumber: number; // Counter for next student number
 }
 
 // WebSocket event types

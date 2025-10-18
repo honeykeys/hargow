@@ -3,12 +3,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
+import toast, { Toaster } from 'react-hot-toast';
 import useSessionStore from '@/lib/store';
 import useBackgroundTranscription from '@/hooks/useBackgroundTranscription';
 import TeacherControls from '@/components/whiteboard/TeacherControls';
 import QuestionPanel from '@/components/whiteboard/QuestionPanel';
 import MainDisplay from '@/components/whiteboard/MainDisplay';
 import QRCodeDisplay from '@/components/shared/QRCodeDisplay';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import ConnectionIndicator from '@/components/ConnectionIndicator';
 
 export default function WhiteboardPage() {
   const params = useParams();
@@ -17,8 +20,11 @@ export default function WhiteboardPage() {
 
   const socketRef = useRef<Socket | null>(null);
   const [showQRCode, setShowQRCode] = useState(false);
+  const [teacherName, setTeacherName] = useState<string | null>(null);
 
   const {
+    session,
+    connectionStatus,
     setSession,
     setConnectionStatus,
     addTranscriptEntry,
@@ -44,8 +50,30 @@ export default function WhiteboardPage() {
     // onBatchAnalyzed callback not needed - useBackgroundTranscription handles socket emission
   });
 
+  // Get or prompt for teacher name
+  useEffect(() => {
+    const storedName = localStorage.getItem('teacherName');
+
+    if (storedName) {
+      setTeacherName(storedName);
+    } else {
+      // Prompt for name if not stored
+      const name = prompt('Please enter your name:');
+      if (name && name.trim()) {
+        const trimmedName = name.trim();
+        setTeacherName(trimmedName);
+        localStorage.setItem('teacherName', trimmedName);
+      } else {
+        toast.error('Name is required to join the session');
+        router.push('/');
+      }
+    }
+  }, [router]);
+
   // Initialize WebSocket connection
   useEffect(() => {
+    // Don't connect until we have a teacher name
+    if (!teacherName) return;
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
     console.log('[Whiteboard] Connecting to WebSocket:', socketUrl);
@@ -70,10 +98,12 @@ export default function WhiteboardPage() {
     socket.on('connect', () => {
       console.log('[Whiteboard] Connected to WebSocket');
       setConnectionStatus('connected');
+      toast.success('Connected to session');
 
-      // Join session as teacher
+      // Join session as teacher with name
       socket.emit('session:join', {
         sessionId,
+        name: teacherName,
         role: 'teacher'
       });
     });
@@ -81,11 +111,13 @@ export default function WhiteboardPage() {
     socket.on('disconnect', () => {
       console.log('[Whiteboard] Disconnected from WebSocket');
       setConnectionStatus('disconnected');
+      toast.error('Disconnected from session');
     });
 
     socket.on('connect_error', (error) => {
       console.error('[Whiteboard] Connection error:', error);
       setConnectionStatus('error');
+      toast.error('Connection error. Retrying...');
     });
 
     // Session event handlers
@@ -103,8 +135,8 @@ export default function WhiteboardPage() {
 
     socket.on('session:ended', () => {
       console.log('[Whiteboard] Session ended');
-      alert('Session has ended');
-      router.push('/');
+      toast.error('Session has ended', { duration: 4000 });
+      setTimeout(() => router.push('/'), 2000);
     });
 
     // Participant events
@@ -154,7 +186,7 @@ export default function WhiteboardPage() {
     socket.on('quiz:generated', (quiz) => {
       console.log('[Whiteboard] Quiz generated:', quiz);
       setActiveQuiz(quiz);
-      alert('Quiz generated successfully!');
+      toast.success('Quiz generated successfully!');
     });
 
     socket.on('quiz:response', (response) => {
@@ -165,7 +197,7 @@ export default function WhiteboardPage() {
     // Error handler
     socket.on('error', (error) => {
       console.error('[Whiteboard] Socket error:', error);
-      alert(error.message || 'An error occurred');
+      toast.error(error.message || 'An error occurred');
     });
 
     // Cleanup on unmount
@@ -176,13 +208,14 @@ export default function WhiteboardPage() {
       socketRef.current = null;
       clearSession();
     };
-  }, [sessionId]);
+  }, [sessionId, teacherName, router, setSession, setConnectionStatus, addTranscriptEntry, addMainPoint, addQuestion, updateQuestion, addParticipant, removeParticipant, setActiveQuiz, addQuizResponse, clearSession]);
 
   // Recording handlers
   const handleToggleRecording = async () => {
     if (isRecording) {
       console.log('[Whiteboard] Stopping recording...');
       stopRecording();
+      toast.success('Recording stopped');
 
       // Notify all clients that recording stopped
       socketRef.current?.emit('recording:stop');
@@ -195,16 +228,17 @@ export default function WhiteboardPage() {
         if (success) {
           // Notify all clients that recording started
           socketRef.current?.emit('recording:start');
+          toast.success('Recording started');
           console.log('[Whiteboard] Recording started successfully');
         } else {
           // Show specific error message
           const errorMessage = transcriptionError?.message || 'Failed to start recording. Please check your microphone permissions and try again.';
-          alert(errorMessage);
+          toast.error(errorMessage, { duration: 5000 });
           console.error('[Whiteboard] Failed to start recording:', transcriptionError);
         }
       } catch (error: any) {
         console.error('[Whiteboard] Error starting recording:', error);
-        alert(error.message || 'An unexpected error occurred. Please try again.');
+        toast.error(error.message || 'An unexpected error occurred. Please try again.', { duration: 5000 });
       }
     }
   };
@@ -221,18 +255,58 @@ export default function WhiteboardPage() {
     socketRef.current?.emit('board:clear', { sessionId });
   };
 
+  // Show loading while waiting for teacher name
+  if (!teacherName) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Setting up session...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Top Controls */}
-      <TeacherControls
-        sessionId={sessionId}
-        socket={socketRef.current}
-        isRecording={isRecording}
-        onToggleRecording={handleToggleRecording}
-        onGenerateQuiz={handleGenerateQuiz}
-        onClearBoard={handleClearBoard}
-        onShowQRCode={() => setShowQRCode(true)}
+    <ErrorBoundary>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: '#363636',
+            color: '#fff',
+          },
+          success: {
+            iconTheme: {
+              primary: '#10b981',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+        }}
       />
+      <div className="h-screen flex flex-col bg-gray-50">
+        {/* Connection Status */}
+        <div className="absolute top-4 right-4 z-10">
+          <ConnectionIndicator status={connectionStatus} />
+        </div>
+
+        {/* Top Controls */}
+        <TeacherControls
+          sessionId={sessionId}
+          socket={socketRef.current}
+          isRecording={isRecording}
+          onToggleRecording={handleToggleRecording}
+          onGenerateQuiz={handleGenerateQuiz}
+          onClearBoard={handleClearBoard}
+          onShowQRCode={() => setShowQRCode(true)}
+        />
 
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
@@ -289,6 +363,7 @@ export default function WhiteboardPage() {
           />
         </svg>
       </button>
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

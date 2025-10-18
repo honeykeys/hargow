@@ -397,7 +397,7 @@
             });
 
             // Question events
-            socket.on('question_received', (question) => {
+            socket.on('question:received', (question) => {
                 logEvent(`Question received: ${question.text} from ${question.studentName}`, 'received');
                 questions.set(question.id, question);
                 updateQuestionsList();

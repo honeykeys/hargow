@@ -15,6 +15,7 @@ import {
   handleSessionEnd,
   handleMainPointAdd,
   handleMainPointEnrich,
+  handleMainPointExplain,
   handleRecordingStarted,
   handleRecordingStopped,
   handleBoardClear
@@ -150,6 +151,11 @@ export function initializeSocketServer(httpServer: HTTPServer): SocketIOServer {
     // Handle main point enrich
     socket.on('mainpoint:enrich', async (data: any) => {
       await handleMainPointEnrich(io!, socket, data, clientSessions);
+    });
+
+    // Handle main point explain
+    socket.on('mainpoint:explain', async (data: any) => {
+      await handleMainPointExplain(io!, socket, data, clientSessions);
     });
 
     // Handle recording started

@@ -279,11 +279,14 @@ export async function handleQuestionSubmit(
 
     console.log(`[WebSocket] Question submitted in session ${sessionId}`);
 
+    // Get anonymized student name
+    const anonymizedName = sessionManager.getAnonymizedStudentName(sessionId, socket.id);
+
     // Create question
     const question: Question = {
       id: nanoid(),
       studentId: socket.id,
-      studentName: socket.data.userName || 'Anonymous',
+      studentName: anonymizedName,
       text: questionText,
       citations: [],
       status: QuestionStatus.PENDING,
@@ -314,6 +317,45 @@ export async function handleQuestionSubmit(
     });
 
     console.log(`[WebSocket] Question ${question.id} added to session ${sessionId}`);
+
+    // Auto-answer the question using Perplexity API
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const answerResponse = await fetch(`${apiUrl}/api/answer-question`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          questionId: question.id,
+          questionText: question.text,
+          sessionId: sessionId
+        })
+      });
+
+      if (answerResponse.ok) {
+        const answerResult = await answerResponse.json();
+
+        // Update question status in session
+        question.status = QuestionStatus.ANSWERED;
+        question.answer = answerResult.answer;
+        question.citations = answerResult.citations || [];
+
+        // Broadcast the answer to all participants
+        io.to(sessionId).emit('question:answered', {
+          questionId: question.id,
+          answer: answerResult.answer,
+          citations: answerResult.citations || []
+        });
+
+        console.log(`[WebSocket] Question ${question.id} auto-answered successfully`);
+      } else {
+        console.error(`[WebSocket] Failed to auto-answer question ${question.id}: API returned ${answerResponse.status}`);
+      }
+    } catch (error) {
+      console.error(`[WebSocket] Error auto-answering question ${question.id}:`, error);
+      // Non-critical error - question is still submitted, just not answered automatically
+    }
   } catch (error) {
     console.error('[WebSocket] Error submitting question:', error);
     socket.emit('error', {
@@ -667,29 +709,57 @@ export async function handleMainPointEnrich(
   clientSessions: Map<string, string>
 ) {
   try {
+    console.log('[WebSocket] handleMainPointEnrich called with data:', data);
     const sessionId = clientSessions.get(socket.id);
+    console.log('[WebSocket] Socket ID:', socket.id, 'Session ID:', sessionId);
 
     if (!sessionId) {
+      console.error('[WebSocket] No session ID found for socket:', socket.id);
       socket.emit('error', {
         message: ERROR_MESSAGES.NOT_IN_SESSION
       });
       return;
     }
 
-    // Check if user is teacher
-    if (!socket.data.isTeacher) {
+    // Broadcast enriched content to all participants
+    console.log('[WebSocket] Broadcasting mainpoint:enriched to session:', sessionId);
+    io.to(sessionId).emit('mainpoint:enriched', data);
+
+    console.log(`[WebSocket] Main point enriched in session ${sessionId}, data:`, data);
+  } catch (error) {
+    console.error('[WebSocket] Error enriching main point:', error);
+  }
+}
+
+/**
+ * Handle main point explanation (simple terms)
+ */
+export async function handleMainPointExplain(
+  io: SocketIOServer,
+  socket: Socket,
+  data: { pointId: string; explainedText: string; citations?: string[] },
+  clientSessions: Map<string, string>
+) {
+  try {
+    console.log('[WebSocket] handleMainPointExplain called with data:', data);
+    const sessionId = clientSessions.get(socket.id);
+    console.log('[WebSocket] Socket ID:', socket.id, 'Session ID:', sessionId);
+
+    if (!sessionId) {
+      console.error('[WebSocket] No session ID found for socket:', socket.id);
       socket.emit('error', {
-        message: ERROR_MESSAGES.TEACHER_ONLY
+        message: ERROR_MESSAGES.NOT_IN_SESSION
       });
       return;
     }
 
-    // Broadcast enriched content to all participants
-    io.to(sessionId).emit('mainpoint:enriched', data);
+    // Broadcast explained content to all participants
+    console.log('[WebSocket] Broadcasting mainpoint:explained to session:', sessionId);
+    io.to(sessionId).emit('mainpoint:explained', data);
 
-    console.log(`[WebSocket] Main point enriched in session ${sessionId}`);
+    console.log(`[WebSocket] Main point explained in session ${sessionId}, data:`, data);
   } catch (error) {
-    console.error('[WebSocket] Error enriching main point:', error);
+    console.error('[WebSocket] Error explaining main point:', error);
   }
 }
 
@@ -865,7 +935,7 @@ export async function handleQuestionAnswer(
 
     // Call the API route to get the answer
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const apiUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
       const response = await fetch(`${apiUrl}/api/answer-question`, {
         method: 'POST',
         headers: {

@@ -56,7 +56,7 @@ export const SOCKET_EVENTS = {
 
   // Question events
   SUBMIT_QUESTION: 'submit_question',
-  QUESTION_RECEIVED: 'question_received',
+  QUESTION_RECEIVED: 'question:received',
   UPVOTE_QUESTION: 'upvote_question',
   ANSWER_QUESTION: 'answer_question',
 
